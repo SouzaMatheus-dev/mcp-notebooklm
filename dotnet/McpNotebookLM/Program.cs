@@ -31,9 +31,11 @@ internal static class Program
                     "Servidor MCP do NotebookLM em notebook.google.com. " +
                     "A autenticação é a sessão Google corporativa gravada por `mcp-notebooklm login`. " +
                     "Nunca peça, repita ou grave cookies, tokens ou NOTEBOOKLM_AUTH_JSON. " +
-                    "Para publicar documentação: PublicarDocumentacao, ou CriarNotebook seguido de " +
-                    "AdicionarDocumentoArquivo, AdicionarDocumentoTexto e AdicionarDocumentoUrl. " +
-                    "Confirme com ListarNotebooks e ListarFontes. Este servidor não apaga notebooks.";
+                    "As tools se chamam status_autenticacao, listar_notebooks, criar_notebook, listar_fontes, " +
+                    "adicionar_documento_texto, adicionar_documento_arquivo, adicionar_documento_url e publicar_documentacao. " +
+                    "Para um manual: publicar_documentacao com pasta de .md ou textos em JSON. " +
+                    "Se o notebook já existe, passe notebookId para acrescentar fontes sem criar outro. " +
+                    "Falha de negócio ou HTTP volta com isError=true. Este servidor não apaga notebooks.";
             })
             .WithStdioServerTransport()
             .WithToolsFromAssembly();

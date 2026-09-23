@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using McpNotebookLM.Services;
 
@@ -9,11 +10,11 @@ namespace McpNotebookLM.Tools;
 [McpServerToolType]
 public sealed class NotebookLmTools(NotebookLmClient client)
 {
-    [McpServerTool, Description("Verifica a sessão Google corporativa do NotebookLM, sem exibir cookies.")]
-    public Task<string> StatusAutenticacao() => Safe(client.StatusAsync);
+    [McpServerTool(Name = "status_autenticacao"), Description("Verifica a sessão Google corporativa do NotebookLM, sem exibir cookies.")]
+    public Task<CallToolResult> StatusAutenticacao() => Safe(client.StatusAsync);
 
-    [McpServerTool, Description("Lista os notebooks da conta autenticada no NotebookLM.")]
-    public Task<string> ListarNotebooks() => Safe(async cancellationToken =>
+    [McpServerTool(Name = "listar_notebooks"), Description("Lista os notebooks da conta autenticada no NotebookLM.")]
+    public Task<CallToolResult> ListarNotebooks() => Safe(async cancellationToken =>
     {
         var notebooks = await client.ListNotebooksAsync(cancellationToken).ConfigureAwait(false);
         if (notebooks.Count == 0)
@@ -37,16 +38,16 @@ public sealed class NotebookLmTools(NotebookLmClient client)
         return builder.ToString().TrimEnd();
     });
 
-    [McpServerTool, Description("Cria um notebook vazio no NotebookLM e devolve o id e o link.")]
-    public Task<string> CriarNotebook(string titulo) => Safe(async cancellationToken =>
+    [McpServerTool(Name = "criar_notebook"), Description("Cria um notebook vazio no NotebookLM e devolve o id e o link.")]
+    public Task<CallToolResult> CriarNotebook(string titulo) => Safe(async cancellationToken =>
     {
         var title = RequireTitle(titulo);
         var notebook = await client.CreateNotebookAsync(title, cancellationToken).ConfigureAwait(false);
         return $"{notebook.Id} | {notebook.Title} | {Link(notebook.Id)}";
     });
 
-    [McpServerTool, Description("Lista as fontes já indexadas em um notebook.")]
-    public Task<string> ListarFontes(string notebookId) => Safe(async cancellationToken =>
+    [McpServerTool(Name = "listar_fontes"), Description("Lista as fontes já indexadas em um notebook.")]
+    public Task<CallToolResult> ListarFontes(string notebookId) => Safe(async cancellationToken =>
     {
         var sources = await client.ListSourcesAsync(RequireId(notebookId), cancellationToken).ConfigureAwait(false);
         if (sources.Count == 0)
@@ -59,13 +60,13 @@ public sealed class NotebookLmTools(NotebookLmClient client)
             sources.Take(200).Select(source => $"{source.Id} | {source.Title}"));
     });
 
-    [McpServerTool, Description("Cola um documento de texto ou Markdown como fonte do notebook.")]
-    public Task<string> AdicionarDocumentoTexto(string notebookId, string titulo, string conteudo) =>
+    [McpServerTool(Name = "adicionar_documento_texto"), Description("Cola um documento de texto ou Markdown como fonte do notebook.")]
+    public Task<CallToolResult> AdicionarDocumentoTexto(string notebookId, string titulo, string conteudo) =>
         Safe(async cancellationToken =>
         {
             if (string.IsNullOrWhiteSpace(conteudo))
             {
-                return "Informe o conteúdo do documento.";
+                throw new NotebookLmException("Informe o conteúdo do documento.");
             }
 
             var sources = await client.AddTextAsync(
@@ -76,8 +77,8 @@ public sealed class NotebookLmTools(NotebookLmClient client)
             return FormatSources(sources);
         });
 
-    [McpServerTool, Description("Adiciona uma URL (página ou YouTube) como fonte do notebook.")]
-    public Task<string> AdicionarDocumentoUrl(string notebookId, string url) =>
+    [McpServerTool(Name = "adicionar_documento_url"), Description("Adiciona uma URL (página ou YouTube) como fonte do notebook.")]
+    public Task<CallToolResult> AdicionarDocumentoUrl(string notebookId, string url) =>
         Safe(async cancellationToken =>
         {
             var sources = await client.AddUrlAsync(RequireId(notebookId), url.Trim(), cancellationToken)
@@ -85,8 +86,8 @@ public sealed class NotebookLmTools(NotebookLmClient client)
             return FormatSources(sources);
         });
 
-    [McpServerTool, Description("Envia um arquivo local (pdf, txt, md, docx, html, csv, epub) como fonte do notebook.")]
-    public Task<string> AdicionarDocumentoArquivo(string notebookId, string caminho) =>
+    [McpServerTool(Name = "adicionar_documento_arquivo"), Description("Envia um arquivo local (pdf, txt, md, docx, html, csv, epub) como fonte do notebook.")]
+    public Task<CallToolResult> AdicionarDocumentoArquivo(string notebookId, string caminho) =>
         Safe(async cancellationToken =>
         {
             var source = await client.AddFileAsync(RequireId(notebookId), caminho, cancellationToken)
@@ -94,45 +95,108 @@ public sealed class NotebookLmTools(NotebookLmClient client)
             return $"{source.Id} | {source.Title}";
         });
 
-    [McpServerTool, Description("Cria um notebook e envia textos, arquivos locais e URLs. Separe vários itens com | ou quebra de linha.")]
-    public Task<string> PublicarDocumentacao(
-        string titulo,
+    [McpServerTool(Name = "publicar_documentacao"), Description(
+        "Publica texto, um JSON de textos, uma pasta de Markdown, arquivos e URLs. " +
+        "Com notebookId, acrescenta fontes no notebook existente. Sem notebookId, cria um notebook com titulo.")]
+    public Task<CallToolResult> PublicarDocumentacao(
+        string titulo = "",
+        string notebookId = "",
         string texto = "",
         string tituloTexto = "Documentação",
+        string textos = "",
+        string pasta = "",
         string arquivos = "",
         string urls = "") => Safe(async cancellationToken =>
     {
-        var title = RequireTitle(titulo);
-        var notebook = await client.CreateNotebookAsync(title, cancellationToken).ConfigureAwait(false);
-        var report = new StringBuilder();
-        report.Append("Notebook ").Append(notebook.Id).Append(" | ").Append(Link(notebook.Id)).AppendLine();
-
+        var texts = new List<(string Title, string Content)>();
         if (!string.IsNullOrWhiteSpace(texto))
         {
-            var added = await client.AddTextAsync(
-                notebook.Id,
-                string.IsNullOrWhiteSpace(tituloTexto) ? "Documentação" : tituloTexto.Trim(),
-                texto,
-                cancellationToken).ConfigureAwait(false);
-            report.AppendLine("Texto: " + FormatSources(added));
+            texts.Add((
+                string.IsNullOrWhiteSpace(tituloTexto) ? "Documentação" : RequireTitle(tituloTexto),
+                texto));
         }
 
-        var files = SplitList(arquivos).Take(20).ToList();
-        foreach (var file in files)
+        texts.AddRange(DocumentationBatch.ParseTexts(textos));
+        if (!string.IsNullOrWhiteSpace(pasta))
         {
-            var added = await client.AddFileAsync(notebook.Id, file, cancellationToken).ConfigureAwait(false);
-            report.Append("Arquivo: ").Append(added.Id).Append(" | ").Append(added.Title).AppendLine();
+            texts.AddRange(DocumentationBatch.ReadMarkdownFolder(pasta));
         }
 
-        foreach (var url in SplitList(urls).Take(20))
+        if (texts.Count > DocumentationBatch.MaxTexts)
         {
-            var added = await client.AddUrlAsync(notebook.Id, url, cancellationToken).ConfigureAwait(false);
-            report.AppendLine("URL: " + FormatSources(added));
+            throw new NotebookLmException(
+                $"No máximo {DocumentationBatch.MaxTexts} textos ou Markdown por chamada.");
         }
 
-        if (string.IsNullOrWhiteSpace(texto) && files.Count == 0 && SplitList(urls).Count == 0)
+        var files = SplitList(arquivos);
+        if (files.Count > DocumentationBatch.MaxFiles)
         {
-            report.AppendLine("Nenhuma fonte enviada. Use texto, arquivos ou urls.");
+            throw new NotebookLmException($"No máximo {DocumentationBatch.MaxFiles} arquivos por chamada.");
+        }
+
+        var links = SplitList(urls);
+        if (links.Count > DocumentationBatch.MaxUrls)
+        {
+            throw new NotebookLmException($"No máximo {DocumentationBatch.MaxUrls} URLs por chamada.");
+        }
+
+        if (texts.Count == 0 && files.Count == 0 && links.Count == 0)
+        {
+            throw new NotebookLmException("Informe texto, textos, pasta, arquivos ou urls.");
+        }
+
+        string id;
+        var report = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(notebookId))
+        {
+            id = RequireId(notebookId);
+            report.Append("Notebook ").Append(id).Append(" | ").Append(Link(id)).AppendLine();
+        }
+        else
+        {
+            var notebook = await client.CreateNotebookAsync(RequireTitle(titulo), cancellationToken)
+                .ConfigureAwait(false);
+            id = notebook.Id;
+            report.Append("Notebook ")
+                .Append(id)
+                .Append(" | ")
+                .Append(notebook.Title)
+                .Append(" | ")
+                .Append(Link(id))
+                .AppendLine();
+        }
+
+        var added = 0;
+        try
+        {
+            foreach (var item in texts)
+            {
+                var sources = await client.AddTextAsync(id, item.Title, item.Content, cancellationToken)
+                    .ConfigureAwait(false);
+                report.AppendLine("Texto: " + FormatSources(sources));
+                added++;
+            }
+
+            foreach (var file in files)
+            {
+                var source = await client.AddFileAsync(id, file, cancellationToken).ConfigureAwait(false);
+                report.Append("Arquivo: ").Append(source.Id).Append(" | ").Append(source.Title).AppendLine();
+                added++;
+            }
+
+            foreach (var url in links)
+            {
+                var sources = await client.AddUrlAsync(id, url, cancellationToken).ConfigureAwait(false);
+                report.AppendLine("URL: " + FormatSources(sources));
+                added++;
+            }
+        }
+        catch (Exception ex) when (ex is NotebookLmException or HttpRequestException or TaskCanceledException or JsonException or IOException)
+        {
+            var detail = ex is NotebookLmException notebookError ? notebookError.Message : Sanitize(ex.Message);
+            throw new NotebookLmException(
+                $"Falha depois de {added} fonte(s) no notebook {id}. " +
+                $"Repita a chamada com notebookId={id} para as fontes que faltam. {detail}");
         }
 
         return report.ToString().TrimEnd();
@@ -140,21 +204,33 @@ public sealed class NotebookLmTools(NotebookLmClient client)
 
     private string Link(string id) => client.BaseUrl + "/notebook/" + id;
 
-    private static async Task<string> Safe(Func<CancellationToken, Task<string>> action)
+    private static async Task<CallToolResult> Safe(Func<CancellationToken, Task<string>> action)
     {
         try
         {
-            return await action(CancellationToken.None).ConfigureAwait(false);
+            return Ok(await action(CancellationToken.None).ConfigureAwait(false));
         }
         catch (NotebookLmException ex)
         {
-            return "Erro: " + ex.Message;
+            return Fail(ex.Message);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or IOException)
         {
-            return "Erro: " + Sanitize(ex.Message);
+            return Fail(Sanitize(ex.Message));
         }
     }
+
+    private static CallToolResult Ok(string text) => new()
+    {
+        IsError = false,
+        Content = [new TextContentBlock { Text = text }],
+    };
+
+    private static CallToolResult Fail(string text) => new()
+    {
+        IsError = true,
+        Content = [new TextContentBlock { Text = text }],
+    };
 
     private static string RequireTitle(string title)
     {

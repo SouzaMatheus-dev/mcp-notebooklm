@@ -32,4 +32,31 @@ public class ResponseParserTests
         Assert.Equal("Caderno", notebooks[0].Title);
         Assert.Equal(1, notebooks[0].SourceCount);
     }
+
+    [Fact]
+    public void SelectCreated_keeps_only_an_id_that_did_not_exist_before()
+    {
+        var known = new HashSet<string>(StringComparer.Ordinal) { "old-id-11111111" };
+        var rows = new[]
+        {
+            new NotebookInfo("old-id-11111111", "Manual", 12),
+            new NotebookInfo("new-id-22222222", "Manual", 0),
+        };
+
+        var selected = ResponseParser.SelectCreated("Manual", known, rows, "old-id-11111111", "[]");
+
+        Assert.Equal("new-id-22222222", selected.Id);
+    }
+
+    [Fact]
+    public void SelectCreated_rejects_a_response_that_only_repeats_an_old_notebook()
+    {
+        var known = new HashSet<string>(StringComparer.Ordinal) { "old-id-11111111" };
+        var rows = new[] { new NotebookInfo("old-id-11111111", "Manual", 12) };
+
+        var error = Assert.Throws<NotebookLmException>(() =>
+            ResponseParser.SelectCreated("Manual", known, rows, "old-id-11111111", "[]"));
+
+        Assert.Contains("id novo", error.Message, StringComparison.Ordinal);
+    }
 }

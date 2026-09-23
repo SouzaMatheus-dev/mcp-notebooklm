@@ -20,7 +20,7 @@ do seu usuário do Windows.
 
 ## Sessão expirada
 
-`StatusAutenticacao` pede um novo login quando a página cai em
+`status_autenticacao` pede um novo login quando a página cai em
 `accounts.google.com` ou o token CSRF some. Rode `mcp-notebooklm login` de novo.
 
 ## O que não colocar no git

@@ -104,18 +104,33 @@ Exemplo: [docs/examples/gemini.json](docs/examples/gemini.json).
 
 ## Tools
 
+Os nomes abaixo são os do protocolo MCP. Uma chamada com o nome em PascalCase
+responde `Unknown tool`.
+
 | Tool | Efeito |
 | --- | --- |
-| `StatusAutenticacao` | Diz se a sessão abre o NotebookLM, sem mostrar segredo |
-| `ListarNotebooks` | Lista id, título e link |
-| `CriarNotebook` | Cria um notebook |
-| `ListarFontes` | Lista as fontes de um notebook |
-| `AdicionarDocumentoTexto` | Cola Markdown ou texto |
-| `AdicionarDocumentoArquivo` | Envia um arquivo local |
-| `AdicionarDocumentoUrl` | Adiciona página ou YouTube |
-| `PublicarDocumentacao` | Cria o notebook e envia texto, arquivos e URLs |
+| `status_autenticacao` | Diz se a sessão abre o NotebookLM, sem mostrar segredo |
+| `listar_notebooks` | Lista id, título e link |
+| `criar_notebook` | Cria um notebook e devolve o id que não existia antes da chamada |
+| `listar_fontes` | Lista as fontes de um notebook |
+| `adicionar_documento_texto` | Cola Markdown ou texto |
+| `adicionar_documento_arquivo` | Envia um arquivo local |
+| `adicionar_documento_url` | Adiciona página ou YouTube |
+| `publicar_documentacao` | Publica um conjunto de fontes. Com `notebookId`, usa o notebook que já existe |
 
-Vários arquivos ou URLs em `PublicarDocumentacao` separam-se com `|` ou quebra de linha.
+Falha de negócio (`NotebookLmException`) ou HTTP volta com `isError: true`.
+Uma lista vazia ("Nenhum notebook encontrado") continua sendo sucesso.
+
+`publicar_documentacao` aceita, na mesma chamada:
+
+- `texto` e `tituloTexto` para um único documento
+- `textos`: JSON `[{"titulo":"...","conteudo":"..."}]`
+- `pasta`: diretório com `.md` ou `.markdown` (o título é o caminho relativo, sem extensão)
+- `arquivos` e `urls`, vários itens separados por `|` ou quebra de linha
+
+Sem `notebookId`, `titulo` é obrigatório e um notebook novo é criado. Com
+`notebookId`, as fontes entram nesse notebook. Se uma fonte falhar no meio, a
+resposta traz o id para repetir só o que faltou.
 
 ---
 
@@ -123,7 +138,7 @@ Vários arquivos ou URLs em `PublicarDocumentacao` separam-se com `|` ou quebra 
 
 - Texto: 450 mil caracteres (`NOTEBOOKLM_MAX_TEXT_CHARS`)
 - Arquivo: 50 MB (`NOTEBOOKLM_MAX_FILE_BYTES`)
-- Até 20 arquivos e 20 URLs por `PublicarDocumentacao`
+- Até 40 textos ou Markdown, 20 arquivos e 20 URLs por `publicar_documentacao`
 
 O caminho do arquivo é resolvido no diretório de trabalho do cliente MCP.
 Prefira caminho absoluto.

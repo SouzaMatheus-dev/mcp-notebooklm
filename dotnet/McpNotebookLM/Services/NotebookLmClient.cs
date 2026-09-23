@@ -32,29 +32,13 @@ public sealed class NotebookLmClient : IDisposable
 
     public async Task<string> StatusAsync(CancellationToken cancellationToken)
     {
-        IReadOnlyList<SessionCookie> cookies;
-        try
-        {
-            cookies = SessionStore.Load(_config);
-        }
-        catch (NotebookLmException ex)
-        {
-            return ex.Message;
-        }
-
+        var cookies = SessionStore.Load(_config);
         var required = SessionStore.HasRequiredCookies(cookies);
-        try
-        {
-            await EnsureSessionAsync(cancellationToken, force: true).ConfigureAwait(false);
-            return
-                $"Autenticado em {_config.BaseUrl}. Cookies carregados: {cookies.Count}. " +
-                $"Cookies de sessão do NotebookLM: {(required ? "presentes" : "incompletos (SID ou __Secure-1PSIDTS ausente)")}. " +
-                "Token CSRF obtido. Valores de cookie não são exibidos.";
-        }
-        catch (NotebookLmException ex)
-        {
-            return ex.Message;
-        }
+        await EnsureSessionAsync(cancellationToken, force: true).ConfigureAwait(false);
+        return
+            $"Autenticado em {_config.BaseUrl}. Cookies carregados: {cookies.Count}. " +
+            $"Cookies de sessão do NotebookLM: {(required ? "presentes" : "incompletos (SID ou __Secure-1PSIDTS ausente)")}. " +
+            "Token CSRF obtido. Valores de cookie não são exibidos.";
     }
 
     public async Task<IReadOnlyList<NotebookInfo>> ListNotebooksAsync(CancellationToken cancellationToken)
@@ -66,27 +50,20 @@ public sealed class NotebookLmClient : IDisposable
 
     public async Task<NotebookInfo> CreateNotebookAsync(string title, CancellationToken cancellationToken)
     {
+        var known = (await ListNotebooksAsync(cancellationToken).ConfigureAwait(false))
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
         var payload = await CallAsync(
             RpcCodec.CreateNotebook,
             RpcCodec.CreateParams(title),
             "/",
             cancellationToken).ConfigureAwait(false);
-        var created = ResponseParser.Notebooks(payload).FirstOrDefault(item =>
-            item.Title.Equals(title, StringComparison.OrdinalIgnoreCase));
-        if (created is not null)
-        {
-            return created;
-        }
-
-        var id = ResponseParser.FirstId(payload);
-        if (id is null)
-        {
-            throw new NotebookLmException(
-                "O notebook pode ter sido criado, mas a resposta não trouxe o id. Forma: " +
-                ResponseParser.Shape(payload));
-        }
-
-        return new NotebookInfo(id, title, 0);
+        return ResponseParser.SelectCreated(
+            title,
+            known,
+            ResponseParser.Notebooks(payload),
+            ResponseParser.FirstId(payload),
+            ResponseParser.Shape(payload));
     }
 
     public async Task<IReadOnlyList<SourceInfo>> ListSourcesAsync(string notebookId, CancellationToken cancellationToken)

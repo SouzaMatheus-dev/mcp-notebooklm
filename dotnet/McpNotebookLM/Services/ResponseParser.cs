@@ -29,6 +29,36 @@ internal static class ResponseParser
             .ToList();
     }
 
+    public static NotebookInfo SelectCreated(
+        string title,
+        IReadOnlySet<string> knownIds,
+        IReadOnlyList<NotebookInfo> responseNotebooks,
+        string? fallbackId,
+        string responseShape)
+    {
+        var fresh = responseNotebooks.Where(item => !knownIds.Contains(item.Id)).ToList();
+        var titled = fresh.FirstOrDefault(item =>
+            item.Title.Equals(title, StringComparison.OrdinalIgnoreCase));
+        if (titled is not null)
+        {
+            return titled;
+        }
+
+        if (fresh.Count > 0)
+        {
+            return fresh[0];
+        }
+
+        if (!string.IsNullOrEmpty(fallbackId) && !knownIds.Contains(fallbackId))
+        {
+            return new NotebookInfo(fallbackId, title, 0);
+        }
+
+        throw new NotebookLmException(
+            "A resposta da criação não trouxe um id novo. Um notebook antigo com o mesmo título foi ignorado. Forma: " +
+            responseShape);
+    }
+
     public static string? FirstId(JsonNode? payload, string? exclude = null)
     {
         string? found = null;

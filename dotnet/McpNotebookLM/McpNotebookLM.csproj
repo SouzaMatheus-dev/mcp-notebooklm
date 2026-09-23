@@ -9,7 +9,7 @@
     <AssemblyName>McpNotebookLM</AssemblyName>
 
     <PackageId>McpNotebookLM</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>matneves</Authors>
     <Company>SouzaMatheus-dev</Company>
     <Description>Servidor MCP para criar notebooks e enviar documentação ao NotebookLM (notebook.google.com) com a sessão Google corporativa do usuário. Credenciais só no ambiente do cliente.</Description>
