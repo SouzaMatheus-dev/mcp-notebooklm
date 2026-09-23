@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>McpNotebookLM</RootNamespace>
+    <AssemblyName>McpNotebookLM</AssemblyName>
+
+    <PackageId>McpNotebookLM</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>matneves</Authors>
+    <Company>SouzaMatheus-dev</Company>
+    <Description>Servidor MCP para criar notebooks e enviar documentação ao NotebookLM (notebook.google.com) com a sessão Google corporativa do usuário. Credenciais só no ambiente do cliente.</Description>
+    <PackageTags>mcp;notebooklm;google;workspace;docs;gemini;dnx</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/SouzaMatheus-dev/mcp-notebooklm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SouzaMatheus-dev/mcp-notebooklm</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>mcp-notebooklm</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="McpNotebookLM.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.4" />
+    <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
+  </ItemGroup>
+
+  <Target Name="BundleLoginHelper" AfterTargets="Build;Publish">
+    <PropertyGroup>
+      <_LoginProject>$(MSBuildThisFileDirectory)..\McpNotebookLM.Login\McpNotebookLM.Login.csproj</_LoginProject>
+      <_LoginOut>$(MSBuildThisFileDirectory)..\McpNotebookLM.Login\bin\$(Configuration)\net8.0-windows10.0.19041.0\</_LoginOut>
+    </PropertyGroup>
+    <MSBuild Projects="$(_LoginProject)" Targets="Build" Properties="Configuration=$(Configuration);TargetFramework=net8.0-windows10.0.19041.0" />
+    <ItemGroup>
+      <_LoginFile Include="$(_LoginOut)McpNotebookLM.Login.*" />
+      <_LoginFile Include="$(_LoginOut)Microsoft.Web.WebView2.*.dll" />
+      <_LoginRuntime Include="$(_LoginOut)runtimes\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_LoginFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="'$(OutputPath)' != ''" />
+    <Copy SourceFiles="@(_LoginRuntime)" DestinationFiles="@(_LoginRuntime->'$(OutputPath)runtimes\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'$(OutputPath)' != ''" />
+    <Copy SourceFiles="@(_LoginFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" Condition="'$(PublishDir)' != ''" />
+    <Copy SourceFiles="@(_LoginRuntime)" DestinationFiles="@(_LoginRuntime->'$(PublishDir)runtimes\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'$(PublishDir)' != ''" />
+  </Target>
+
+</Project>

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="McpNotebookLM.Login/McpNotebookLM.Login.csproj" />
+  <Project Path="McpNotebookLM.Tests/McpNotebookLM.Tests.csproj" />
+  <Project Path="McpNotebookLM/McpNotebookLM.csproj" />
+</Solution>

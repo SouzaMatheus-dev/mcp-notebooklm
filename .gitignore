@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+nupkg/
+.vs/
+.idea/
+*.user
+*.log
+.env
+storage_state.json
+host.json

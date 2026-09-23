@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "notebooklm": {
+      "command": "mcp-notebooklm",
+      "timeout": 180000,
+      "trust": false
+    }
+  }
+}
