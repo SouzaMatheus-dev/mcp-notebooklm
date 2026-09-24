@@ -21,13 +21,14 @@ contrato sem aviso. Não há vínculo com o Google.
 - Abre o login Google (Workspace / SSO) numa janela Edge (WebView2)
 - Lista e cria notebooks
 - Envia documentação em texto/Markdown, arquivo local ou URL
+- Substitui uma fonte pelo mesmo título quando a RFC ou o ADR muda
 - Devolve o link `https://notebook.google.com/notebook/{id}`
 
 Arquivos aceitos: `.pdf`, `.txt`, `.md`, `.docx`, `.html`, `.csv`, `.epub`.
 
 ## O que este pacote não faz
 
-- Não apaga notebook nem fonte
+- Não apaga notebook. `atualizar_fonte` remove só a fonte do título informado e envia o conteúdo novo
 - Não lê o cofre de cookies do Chrome/Edge do dia a dia
 - Não imprime cookie, `SAPISID` nem `NOTEBOOKLM_AUTH_JSON`
 
@@ -52,6 +53,15 @@ dotnet tool update --global McpNotebookLM
 ```
 
 O comando instalado é `mcp-notebooklm`.
+
+Para uma pasta grande, fora do timeout do agente:
+
+```powershell
+mcp-notebooklm publicar --pasta C:\docs\adrs --titulo "ADRs" --lote 8
+mcp-notebooklm publicar --pasta C:\docs\adrs --notebook <id>
+```
+
+A repetição pula o arquivo cujo conteúdo não mudou e troca o que mudou.
 
 ### Login corporativo
 
@@ -116,7 +126,8 @@ responde `Unknown tool`.
 | `adicionar_documento_texto` | Cola Markdown ou texto |
 | `adicionar_documento_arquivo` | Envia um arquivo local |
 | `adicionar_documento_url` | Adiciona página ou YouTube |
-| `publicar_documentacao` | Publica um conjunto de fontes. Com `notebookId`, usa o notebook que já existe |
+| `atualizar_fonte` | Troca a fonte de mesmo título: remove a anterior e envia o texto ou arquivo novo |
+| `publicar_documentacao` | Publica um conjunto de fontes. Com `notebookId`, usa o notebook que já existe. Com `substituir=true`, troca as de mesmo título |
 
 Falha de negócio (`NotebookLmException`) ou HTTP volta com `isError: true`.
 Uma lista vazia ("Nenhum notebook encontrado") continua sendo sucesso.
@@ -128,9 +139,18 @@ Uma lista vazia ("Nenhum notebook encontrado") continua sendo sucesso.
 - `pasta`: diretório com `.md` ou `.markdown` (o título é o caminho relativo, sem extensão)
 - `arquivos` e `urls`, vários itens separados por `|` ou quebra de linha
 
-Sem `notebookId`, `titulo` é obrigatório e um notebook novo é criado. Com
-`notebookId`, as fontes entram nesse notebook. Se uma fonte falhar no meio, a
-resposta traz o id para repetir só o que faltou.
+Sem `notebookId`, `titulo` é obrigatório e um notebook novo é criado. Cada
+chamada envia no máximo `lote` fontes (padrão 8, teto 20). A resposta traz o
+`notebookId` e, se ainda houver arquivo, pede a mesma chamada de novo. Na
+repetição, o título que já está no notebook é pulado. Com `substituir=true`,
+use o `inicio` devolvido para o lote seguinte.
+
+Se uma fonte falhar no meio, a resposta traz o id. Repetir a chamada continua
+do que falta.
+
+`atualizar_fonte` recebe `notebookId` e um dos dois: `conteudo` com `titulo`,
+ou `caminho` do arquivo. O nome comparado é o título da fonte (no arquivo, o
+nome do arquivo). Várias fontes com o mesmo título interrompem a chamada.
 
 ---
 
@@ -138,7 +158,7 @@ resposta traz o id para repetir só o que faltou.
 
 - Texto: 450 mil caracteres (`NOTEBOOKLM_MAX_TEXT_CHARS`)
 - Arquivo: 50 MB (`NOTEBOOKLM_MAX_FILE_BYTES`)
-- Até 40 textos ou Markdown, 20 arquivos e 20 URLs por `publicar_documentacao`
+- Até 300 fontes por publicação, em lotes de 8 (`lote`, no máximo 20)
 
 O caminho do arquivo é resolvido no diretório de trabalho do cliente MCP.
 Prefira caminho absoluto.

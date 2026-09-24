@@ -10,6 +10,9 @@ public sealed class NotebookLmConfig
 
     public string HostPath => Path.Combine(Path.GetDirectoryName(StoragePath) ?? ProfileDirectory, "host.json");
 
+    public string SyncPath(string notebookId) =>
+        Path.Combine(ProfileDirectory, "sync", notebookId + ".json");
+
     public string ProfileDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mcp-notebooklm");
 

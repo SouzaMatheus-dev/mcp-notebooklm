@@ -2,13 +2,26 @@ using System.Text.Json;
 
 namespace McpNotebookLM.Services;
 
+internal enum DocumentationKind
+{
+    Text,
+    MarkdownFile,
+    File,
+    Url,
+}
+
+internal sealed record DocumentationItem(DocumentationKind Kind, string Title, string Payload);
+
 internal static class DocumentationBatch
 {
-    public const int MaxTexts = 40;
-    public const int MaxFiles = 20;
-    public const int MaxUrls = 20;
+    public const int DefaultBatch = 8;
+    public const int MaxBatch = 20;
+    public const int MaxItems = 300;
 
-    public static List<(string Title, string Content)> ParseTexts(string? json)
+    public static int NormalizeBatch(int lote) =>
+        lote <= 0 ? DefaultBatch : Math.Clamp(lote, 1, MaxBatch);
+
+    public static List<DocumentationItem> ParseTexts(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -33,7 +46,7 @@ internal static class DocumentationBatch
                 throw new NotebookLmException("textos deve ser um JSON array de {titulo, conteudo}.");
             }
 
-            var list = new List<(string Title, string Content)>();
+            var list = new List<DocumentationItem>();
             foreach (var item in document.RootElement.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object ||
@@ -52,14 +65,14 @@ internal static class DocumentationBatch
                     throw new NotebookLmException("Cada item de textos precisa de titulo (1–200) e conteudo.");
                 }
 
-                list.Add((title, content));
+                list.Add(new DocumentationItem(DocumentationKind.Text, title, content));
             }
 
             return list;
         }
     }
 
-    public static List<(string Title, string Content)> ReadMarkdownFolder(string folder)
+    public static List<DocumentationItem> ListMarkdownFolder(string folder)
     {
         var root = Path.GetFullPath(folder);
         if (!Directory.Exists(root))
@@ -79,32 +92,69 @@ internal static class DocumentationBatch
             throw new NotebookLmException("Nenhum arquivo .md ou .markdown em " + root);
         }
 
-        if (files.Count > MaxTexts)
+        if (files.Count > MaxItems)
         {
-            throw new NotebookLmException($"A pasta tem mais de {MaxTexts} arquivos Markdown.");
+            throw new NotebookLmException($"A pasta tem mais de {MaxItems} arquivos Markdown.");
         }
 
-        var list = new List<(string Title, string Content)>(files.Count);
+        var list = new List<DocumentationItem>(files.Count);
         foreach (var file in files)
         {
             var relative = Path.GetRelativePath(root, file);
-            var title = Path.ChangeExtension(relative, null)
-                .Replace(Path.DirectorySeparatorChar, '/')
-                .Replace(Path.AltDirectorySeparatorChar, '/');
-            if (title.Length is < 1 or > 200)
-            {
-                throw new NotebookLmException("O título derivado de " + relative + " precisa ter entre 1 e 200 caracteres.");
-            }
-
-            var content = File.ReadAllText(file);
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                throw new NotebookLmException("Arquivo Markdown vazio: " + relative);
-            }
-
-            list.Add((title, content));
+            var title = MarkdownTitle(root, file);
+            list.Add(new DocumentationItem(DocumentationKind.MarkdownFile, title, file));
         }
 
         return list;
+    }
+
+    public static string ReadMarkdown(DocumentationItem item)
+    {
+        var content = File.ReadAllText(item.Payload);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            throw new NotebookLmException("Arquivo Markdown vazio: " + item.Title);
+        }
+
+        return content;
+    }
+
+    public static List<DocumentationItem> Pending(
+        IReadOnlyList<DocumentationItem> items,
+        IReadOnlyList<SourceInfo> existing,
+        bool replace)
+    {
+        if (replace)
+        {
+            return items.ToList();
+        }
+
+        var titles = existing.Select(source => source.Title).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var documentsStarted = items.Any(item =>
+            item.Kind != DocumentationKind.Url && titles.Contains(item.Title));
+        return items.Where(item =>
+            item.Kind == DocumentationKind.Url
+                ? !documentsStarted
+                : !titles.Contains(item.Title)).ToList();
+    }
+
+    public static List<DocumentationItem> Page(IReadOnlyList<DocumentationItem> pending, int inicio, int lote, bool replace)
+    {
+        var start = replace ? Math.Clamp(inicio, 0, pending.Count) : 0;
+        return pending.Skip(start).Take(lote).ToList();
+    }
+
+    private static string MarkdownTitle(string root, string file)
+    {
+        var relative = Path.GetRelativePath(root, file);
+        var title = Path.ChangeExtension(relative, null)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+        if (title.Length is < 1 or > 200)
+        {
+            throw new NotebookLmException("O título derivado de " + relative + " precisa ter entre 1 e 200 caracteres.");
+        }
+
+        return title;
     }
 }

@@ -50,4 +50,12 @@ public class RpcCodecTests
         Assert.Equal("conteudo", spec[1]![1]!.GetValue<string>());
         Assert.Equal(2, spec[3]!.GetValue<int>());
     }
+
+    [Fact]
+    public void DeleteSourceParams_nests_the_source_id_three_times()
+    {
+        var parameters = RpcCodec.DeleteSourceParams("src-12345678");
+
+        Assert.Equal("src-12345678", parameters[0]![0]![0]!.GetValue<string>());
+    }
 }

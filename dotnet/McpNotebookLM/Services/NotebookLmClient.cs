@@ -76,6 +76,47 @@ public sealed class NotebookLmClient : IDisposable
         return ResponseParser.Sources(payload);
     }
 
+    public async Task<IReadOnlyList<string>> WaitUntilReadyAsync(
+        string notebookId,
+        IReadOnlyCollection<string> sourceIds,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var pending = sourceIds.Where(id => id.Length > 0).ToHashSet(StringComparer.Ordinal);
+        var deadline = DateTime.UtcNow + timeout;
+        while (pending.Count > 0)
+        {
+            var sources = await ListSourcesAsync(notebookId, cancellationToken).ConfigureAwait(false);
+            foreach (var source in sources)
+            {
+                if (!pending.Contains(source.Id))
+                {
+                    continue;
+                }
+
+                if (source.Status == 3)
+                {
+                    throw new NotebookLmException(
+                        $"A fonte {source.Id} ({source.Title}) falhou na indexação.");
+                }
+
+                if (source.Status is null or 2)
+                {
+                    pending.Remove(source.Id);
+                }
+            }
+
+            if (pending.Count == 0 || DateTime.UtcNow >= deadline)
+            {
+                break;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+        }
+
+        return pending.ToList();
+    }
+
     public async Task<IReadOnlyList<SourceInfo>> AddTextAsync(
         string notebookId,
         string title,
@@ -160,6 +201,90 @@ public sealed class NotebookLmClient : IDisposable
         await UploadBytesAsync(notebookId, sourceId, fileName, bytes, ContentType(extension), cancellationToken)
             .ConfigureAwait(false);
         return new SourceInfo(sourceId, fileName);
+    }
+
+    public async Task DeleteSourceAsync(string notebookId, string sourceId, CancellationToken cancellationToken)
+    {
+        await CallAsync(
+            RpcCodec.DeleteSource,
+            RpcCodec.DeleteSourceParams(sourceId),
+            NotebookPath(notebookId),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RenameSourceAsync(
+        string notebookId,
+        string sourceId,
+        string title,
+        CancellationToken cancellationToken)
+    {
+        await CallAsync(
+            RpcCodec.RenameSource,
+            RpcCodec.RenameSourceParams(sourceId, title),
+            NotebookPath(notebookId),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<SourceInfo> ReplaceTextAsync(
+        string notebookId,
+        string title,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var existing = SourceReplacement.RequireSingle(
+            await ListSourcesAsync(notebookId, cancellationToken).ConfigureAwait(false),
+            title);
+        await DeleteSourceAsync(notebookId, existing.Id, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var added = await AddTextAsync(notebookId, title, content, cancellationToken).ConfigureAwait(false);
+            var created = added.FirstOrDefault();
+            return new SourceInfo(created?.Id ?? "", title);
+        }
+        catch (Exception ex) when (ex is NotebookLmException or HttpRequestException or TaskCanceledException or IOException)
+        {
+            throw new NotebookLmException(
+                $"A fonte {existing.Id} (\"{title}\") foi removida, mas o conteúdo novo não entrou no notebook {notebookId}. " +
+                "Envie de novo com adicionar_documento_texto. " + ex.Message);
+        }
+    }
+
+    public async Task<SourceInfo> ReplaceFileAsync(
+        string notebookId,
+        string path,
+        string? title,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(Path.GetFullPath(path)))
+        {
+            throw new NotebookLmException($"Arquivo não encontrado: {Path.GetFullPath(path)}");
+        }
+
+        var fileName = Path.GetFileName(path);
+        var targetTitle = string.IsNullOrWhiteSpace(title) ? fileName : title.Trim();
+        var existing = SourceReplacement.RequireSingle(
+            await ListSourcesAsync(notebookId, cancellationToken).ConfigureAwait(false),
+            targetTitle);
+        await DeleteSourceAsync(notebookId, existing.Id, cancellationToken).ConfigureAwait(false);
+        SourceInfo created;
+        try
+        {
+            created = await AddFileAsync(notebookId, path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is NotebookLmException or HttpRequestException or TaskCanceledException or IOException)
+        {
+            throw new NotebookLmException(
+                $"A fonte {existing.Id} (\"{targetTitle}\") foi removida, mas o arquivo novo não entrou no notebook {notebookId}. " +
+                "Envie de novo com adicionar_documento_arquivo. " + ex.Message);
+        }
+
+        if (!created.Title.Equals(targetTitle, StringComparison.Ordinal))
+        {
+            await RenameSourceAsync(notebookId, created.Id, targetTitle, cancellationToken).ConfigureAwait(false);
+            return new SourceInfo(created.Id, targetTitle);
+        }
+
+        return created;
     }
 
     public void Dispose() => _http.Dispose();

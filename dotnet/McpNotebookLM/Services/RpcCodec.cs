@@ -11,6 +11,8 @@ internal static class RpcCodec
     public const string GetNotebook = "rLM1Ne";
     public const string AddSource = "izAoDd";
     public const string AddSourceFile = "o4cbdc";
+    public const string DeleteSource = "tGMBJ";
+    public const string RenameSource = "b7Wfje";
 
     private static readonly JsonSerializerOptions Compact = new()
     {
@@ -79,6 +81,12 @@ internal static class RpcCodec
             : new() { null, null, new JsonArray { url }, null, null, null, null, null, null, null, 1 };
         return new JsonArray { new JsonArray { spec }, notebookId, TemplateBlock() };
     }
+
+    public static JsonArray DeleteSourceParams(string sourceId) =>
+        new() { new JsonArray { new JsonArray { sourceId } } };
+
+    public static JsonArray RenameSourceParams(string sourceId, string title) =>
+        new() { null, new JsonArray { sourceId }, new JsonArray { new JsonArray { new JsonArray { title } } } };
 
     public static JsonArray RegisterFileParams(string notebookId, string fileName) =>
         new()

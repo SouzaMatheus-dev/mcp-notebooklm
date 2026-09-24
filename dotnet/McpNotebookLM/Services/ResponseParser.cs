@@ -4,7 +4,7 @@ namespace McpNotebookLM.Services;
 
 public sealed record NotebookInfo(string Id, string Title, int SourceCount);
 
-public sealed record SourceInfo(string Id, string Title);
+public sealed record SourceInfo(string Id, string Title, int? Status = null);
 
 internal static class ResponseParser
 {
@@ -138,7 +138,7 @@ internal static class ResponseParser
         var title = array.Count > 1 ? StringOf(array[1]) : null;
         if (LooksLikeId(id) && title is not null)
         {
-            rows.Add(new SourceInfo(id, title));
+            rows.Add(new SourceInfo(id, title, ReadStatus(array.Count > 3 ? array[3] : null)));
             return;
         }
 
@@ -168,6 +168,16 @@ internal static class ResponseParser
                 WalkIds(child, exclude, ref found, depth + 1);
             }
         }
+    }
+
+    private static int? ReadStatus(JsonNode? settings)
+    {
+        if (settings is not JsonArray array || array.Count < 2 || array[1] is not JsonValue value)
+        {
+            return null;
+        }
+
+        return value.TryGetValue<int>(out var status) ? status : null;
     }
 
     private static string ReadId(JsonNode? node)

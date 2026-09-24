@@ -95,9 +95,35 @@ public sealed class NotebookLmTools(NotebookLmClient client)
             return $"{source.Id} | {source.Title}";
         });
 
+    [McpServerTool(Name = "atualizar_fonte"), Description(
+        "Substitui a fonte de mesmo título em um notebook existente. " +
+        "Remove só essa fonte e envia o texto ou arquivo novo com o mesmo nome.")]
+    public Task<CallToolResult> AtualizarFonte(
+        string notebookId,
+        string titulo = "",
+        string conteudo = "",
+        string caminho = "") => Safe(async cancellationToken =>
+    {
+        var id = RequireId(notebookId);
+        var hasText = !string.IsNullOrWhiteSpace(conteudo);
+        var hasFile = !string.IsNullOrWhiteSpace(caminho);
+        if (hasText == hasFile)
+        {
+            throw new NotebookLmException("Informe conteudo ou caminho, um dos dois.");
+        }
+
+        SourceInfo source = hasText
+            ? await client.ReplaceTextAsync(id, RequireTitle(titulo), conteudo, cancellationToken).ConfigureAwait(false)
+            : await client.ReplaceFileAsync(id, caminho, string.IsNullOrWhiteSpace(titulo) ? null : RequireTitle(titulo), cancellationToken)
+                .ConfigureAwait(false);
+        return $"Notebook {id} | {source.Id} | {source.Title} | {Link(id)}";
+    });
+
     [McpServerTool(Name = "publicar_documentacao"), Description(
         "Publica texto, um JSON de textos, uma pasta de Markdown, arquivos e URLs. " +
-        "Com notebookId, acrescenta fontes no notebook existente. Sem notebookId, cria um notebook com titulo.")]
+        "Com notebookId, acrescenta o que ainda não está no notebook. " +
+        "Cada chamada envia no máximo um lote e devolve o notebookId para a próxima. " +
+        "Com substituir=true, troca as fontes de mesmo título a partir de inicio.")]
     public Task<CallToolResult> PublicarDocumentacao(
         string titulo = "",
         string notebookId = "",
@@ -106,43 +132,51 @@ public sealed class NotebookLmTools(NotebookLmClient client)
         string textos = "",
         string pasta = "",
         string arquivos = "",
-        string urls = "") => Safe(async cancellationToken =>
+        string urls = "",
+        bool substituir = false,
+        int lote = 8,
+        int inicio = 0) => Safe(async cancellationToken =>
     {
-        var texts = new List<(string Title, string Content)>();
+        var items = new List<DocumentationItem>();
         if (!string.IsNullOrWhiteSpace(texto))
         {
-            texts.Add((
+            items.Add(new DocumentationItem(
+                DocumentationKind.Text,
                 string.IsNullOrWhiteSpace(tituloTexto) ? "Documentação" : RequireTitle(tituloTexto),
                 texto));
         }
 
-        texts.AddRange(DocumentationBatch.ParseTexts(textos));
+        items.AddRange(DocumentationBatch.ParseTexts(textos));
         if (!string.IsNullOrWhiteSpace(pasta))
         {
-            texts.AddRange(DocumentationBatch.ReadMarkdownFolder(pasta));
+            items.AddRange(DocumentationBatch.ListMarkdownFolder(pasta));
         }
 
-        if (texts.Count > DocumentationBatch.MaxTexts)
+        foreach (var file in SplitList(arquivos))
         {
-            throw new NotebookLmException(
-                $"No máximo {DocumentationBatch.MaxTexts} textos ou Markdown por chamada.");
+            items.Add(new DocumentationItem(DocumentationKind.File, Path.GetFileName(file), file));
         }
 
-        var files = SplitList(arquivos);
-        if (files.Count > DocumentationBatch.MaxFiles)
-        {
-            throw new NotebookLmException($"No máximo {DocumentationBatch.MaxFiles} arquivos por chamada.");
-        }
+        var urlItems = SplitList(urls)
+            .Select(url => new DocumentationItem(DocumentationKind.Url, url, url))
+            .ToList();
+        items.InsertRange(0, urlItems);
 
-        var links = SplitList(urls);
-        if (links.Count > DocumentationBatch.MaxUrls)
-        {
-            throw new NotebookLmException($"No máximo {DocumentationBatch.MaxUrls} URLs por chamada.");
-        }
-
-        if (texts.Count == 0 && files.Count == 0 && links.Count == 0)
+        if (items.Count == 0)
         {
             throw new NotebookLmException("Informe texto, textos, pasta, arquivos ou urls.");
+        }
+
+        if (items.Count > DocumentationBatch.MaxItems)
+        {
+            throw new NotebookLmException($"No máximo {DocumentationBatch.MaxItems} fontes por publicação.");
+        }
+
+        var batchSize = DocumentationBatch.NormalizeBatch(lote);
+
+        if (substituir && string.IsNullOrWhiteSpace(notebookId))
+        {
+            throw new NotebookLmException("substituir exige notebookId de um notebook que já existe.");
         }
 
         string id;
@@ -166,29 +200,150 @@ public sealed class NotebookLmTools(NotebookLmClient client)
                 .AppendLine();
         }
 
+        var existing = await client.ListSourcesAsync(id, cancellationToken).ConfigureAwait(false);
+        var syncPath = new NotebookLmConfig().SyncPath(id);
+        var manifest = SourceSync.Load(syncPath);
+        var titles = existing.Select(source => source.Title).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        List<SyncDecision> work;
+        if (substituir)
+        {
+            work = items
+                .Select(item => new SyncDecision(
+                    item,
+                    "",
+                    titles.Contains(item.Title) ? SyncAction.Replace : SyncAction.Add))
+                .ToList();
+        }
+        else
+        {
+            work = [];
+            foreach (var item in items.Where(item => item.Kind != DocumentationKind.Url))
+            {
+                var hash = SourceSync.Fingerprint(item);
+                var action = SourceSync.Decide(item.Title, hash, manifest, titles.Contains(item.Title));
+                if (action == SyncAction.Skip && !manifest.ContainsKey(item.Title) && titles.Contains(item.Title))
+                {
+                    manifest[item.Title] = hash;
+                }
+
+                if (action != SyncAction.Skip)
+                {
+                    work.Add(new SyncDecision(item, hash, action));
+                }
+            }
+
+            SourceSync.Save(syncPath, manifest);
+        }
+
+        if (!string.IsNullOrWhiteSpace(pasta))
+        {
+            var planned = items
+                .Where(item => item.Kind != DocumentationKind.Url)
+                .Select(item => item.Title)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var absent = existing
+                .Select(source => source.Title)
+                .Where(title => !planned.Contains(title))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(30)
+                .ToList();
+            if (absent.Count > 0)
+            {
+                report.AppendLine("No notebook e fora da pasta: " + string.Join(", ", absent));
+            }
+        }
+
+        var start = substituir ? Math.Max(0, inicio) : 0;
+        var page = substituir
+            ? work.Skip(start).Take(batchSize).ToList()
+            : work.Take(batchSize).ToList();
+        var pendingCount = substituir ? Math.Max(0, work.Count - start) : work.Count;
+        if (page.Count == 0)
+        {
+            report.AppendLine(substituir
+                ? "Nada neste intervalo. Aumente inicio ou a publicação já percorreu a lista."
+                : "Nada pendente. As fontes com o mesmo conteúdo já estão no notebook.");
+            report.AppendLine("Publicação deste conjunto concluída.");
+            return report.ToString().TrimEnd();
+        }
+
+        foreach (var decision in page)
+        {
+            if (decision.Item.Kind != DocumentationKind.Url)
+            {
+                SourceReplacement.FindSingle(existing, decision.Item.Title);
+            }
+        }
+
         var added = 0;
+        var sentIds = new List<string>();
         try
         {
-            foreach (var item in texts)
+            foreach (var decision in page)
             {
-                var sources = await client.AddTextAsync(id, item.Title, item.Content, cancellationToken)
-                    .ConfigureAwait(false);
-                report.AppendLine("Texto: " + FormatSources(sources));
+                var item = decision.Item;
+                var replace = decision.Action == SyncAction.Replace && item.Kind != DocumentationKind.Url;
+                switch (item.Kind)
+                {
+                    case DocumentationKind.Text:
+                    case DocumentationKind.MarkdownFile:
+                        var content = item.Kind == DocumentationKind.MarkdownFile
+                            ? DocumentationBatch.ReadMarkdown(item)
+                            : item.Payload;
+                        if (replace)
+                        {
+                            var source = await client.ReplaceTextAsync(id, item.Title, content, cancellationToken)
+                                .ConfigureAwait(false);
+                            sentIds.Add(source.Id);
+                            report.Append("Texto atualizado: ").Append(source.Id).Append(" | ").Append(source.Title).AppendLine();
+                        }
+                        else
+                        {
+                            var sources = await client.AddTextAsync(id, item.Title, content, cancellationToken)
+                                .ConfigureAwait(false);
+                            sentIds.AddRange(sources.Select(source => source.Id));
+                            report.AppendLine("Texto: " + FormatSources(sources));
+                        }
+
+                        break;
+                    case DocumentationKind.File:
+                        if (replace)
+                        {
+                            var source = await client.ReplaceFileAsync(id, item.Payload, null, cancellationToken)
+                                .ConfigureAwait(false);
+                            sentIds.Add(source.Id);
+                            report.Append("Arquivo atualizado: ").Append(source.Id).Append(" | ").Append(source.Title).AppendLine();
+                        }
+                        else
+                        {
+                            var source = await client.AddFileAsync(id, item.Payload, cancellationToken)
+                                .ConfigureAwait(false);
+                            sentIds.Add(source.Id);
+                            report.Append("Arquivo: ").Append(source.Id).Append(" | ").Append(source.Title).AppendLine();
+                        }
+
+                        break;
+                    default:
+                        var links = await client.AddUrlAsync(id, item.Payload, cancellationToken).ConfigureAwait(false);
+                        sentIds.AddRange(links.Select(source => source.Id));
+                        report.AppendLine("URL: " + FormatSources(links));
+                        break;
+                }
+
+                if (decision.Hash.Length > 0)
+                {
+                    manifest[item.Title] = decision.Hash;
+                    SourceSync.Save(syncPath, manifest);
+                }
+
                 added++;
             }
 
-            foreach (var file in files)
+            var indexing = await client.WaitUntilReadyAsync(
+                id, sentIds, TimeSpan.FromSeconds(90), cancellationToken).ConfigureAwait(false);
+            if (indexing.Count > 0)
             {
-                var source = await client.AddFileAsync(id, file, cancellationToken).ConfigureAwait(false);
-                report.Append("Arquivo: ").Append(source.Id).Append(" | ").Append(source.Title).AppendLine();
-                added++;
-            }
-
-            foreach (var url in links)
-            {
-                var sources = await client.AddUrlAsync(id, url, cancellationToken).ConfigureAwait(false);
-                report.AppendLine("URL: " + FormatSources(sources));
-                added++;
+                report.AppendLine("Ainda indexando: " + string.Join(", ", indexing));
             }
         }
         catch (Exception ex) when (ex is NotebookLmException or HttpRequestException or TaskCanceledException or JsonException or IOException)
@@ -196,7 +351,25 @@ public sealed class NotebookLmTools(NotebookLmClient client)
             var detail = ex is NotebookLmException notebookError ? notebookError.Message : Sanitize(ex.Message);
             throw new NotebookLmException(
                 $"Falha depois de {added} fonte(s) no notebook {id}. " +
-                $"Repita a chamada com notebookId={id} para as fontes que faltam. {detail}");
+                $"Repita a chamada com notebookId={id}. O que já entrou é pulado. {detail}");
+        }
+
+        var sentThrough = start + added;
+        var remaining = pendingCount - added;
+        report.Append("Lote ").Append(added).Append(" de ").Append(pendingCount).Append(" pendente(s).").AppendLine();
+        if (remaining > 0)
+        {
+            report.Append("Faltam ").Append(remaining).Append(". Repita com notebookId=").Append(id);
+            if (substituir)
+            {
+                report.Append(" substituir=true inicio=").Append(sentThrough);
+            }
+
+            report.AppendLine(".");
+        }
+        else
+        {
+            report.AppendLine("Publicação deste conjunto concluída.");
         }
 
         return report.ToString().TrimEnd();

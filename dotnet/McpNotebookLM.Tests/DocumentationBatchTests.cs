@@ -13,7 +13,7 @@ public class DocumentationBatchTests
 
         Assert.Single(items);
         Assert.Equal("Intro", items[0].Title);
-        Assert.Contains("linha | outra", items[0].Content, StringComparison.Ordinal);
+        Assert.Contains("linha | outra", items[0].Payload, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -25,15 +25,34 @@ public class DocumentationBatchTests
 
         try
         {
-            var items = DocumentationBatch.ReadMarkdownFolder(root);
+            var items = DocumentationBatch.ListMarkdownFolder(root);
 
             Assert.Single(items);
             Assert.Equal("guia/01-intro", items[0].Title);
-            Assert.Equal("# Intro", items[0].Content);
+            Assert.Equal("# Intro", DocumentationBatch.ReadMarkdown(items[0]));
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public void Page_skips_titles_already_in_the_notebook_and_limits_the_batch()
+    {
+        var items = new List<DocumentationItem>
+        {
+            new(DocumentationKind.MarkdownFile, "a", "a.md"),
+            new(DocumentationKind.MarkdownFile, "b", "b.md"),
+            new(DocumentationKind.MarkdownFile, "c", "c.md"),
+        };
+        var existing = new List<SourceInfo> { new("src-aaaaaaaa", "a") };
+
+        var pending = DocumentationBatch.Pending(items, existing, replace: false);
+        var page = DocumentationBatch.Page(pending, inicio: 0, lote: 1, replace: false);
+
+        Assert.Equal(["b", "c"], pending.Select(item => item.Title).ToArray());
+        Assert.Equal("b", page[0].Title);
+        Assert.Single(page);
     }
 }
