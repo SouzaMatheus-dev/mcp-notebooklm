@@ -1,5 +1,17 @@
 # McpNotebookLM
 
+[![NuGet](https://img.shields.io/nuget/v/McpNotebookLM?logo=nuget&logoColor=white&label=NuGet&color=004880)](https://www.nuget.org/packages/McpNotebookLM)
+[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download/dotnet/8.0)
+[![C#](https://img.shields.io/badge/C%23-12-239120?logo=csharp&logoColor=white)](https://learn.microsoft.com/dotnet/csharp/)
+[![MCP](https://img.shields.io/badge/MCP-1.4-111111)](https://modelcontextprotocol.io)
+[![License](https://img.shields.io/github/license/SouzaMatheus-dev/mcp-notebooklm?color=blue)](https://github.com/SouzaMatheus-dev/mcp-notebooklm/blob/main/LICENSE)
+
+![NotebookLM](https://img.shields.io/badge/NotebookLM-Google-4285F4?logo=google&logoColor=white)
+![WebView2](https://img.shields.io/badge/Login-WebView2-0078D4?logo=microsoftedge&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-sess%C3%A3o%20local-0078D4?logo=windows&logoColor=white)
+![Markdown](https://img.shields.io/badge/Docs-Markdown-083344)
+![Fontes](https://img.shields.io/badge/Fontes-PDF%20%7C%20URL-7c3aed)
+
 Servidor **MCP** para criar notebooks e enviar documentação ao
 [NotebookLM](https://notebook.google.com/) com a **conta Google corporativa**
 de quem está usando a máquina.
